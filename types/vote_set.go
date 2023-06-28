@@ -131,6 +131,35 @@ func (voteSet *VoteSet) Size() int {
 	return voteSet.valSet.Size()
 }
 
+func (voteSet *VoteSet) Sum() int64 {
+	if voteSet == nil {
+		return 0
+	}
+	return voteSet.sum
+}
+
+func (voteSet *VoteSet) GetTwoThirds() int64 {
+	if voteSet == nil {
+		return 0
+	}
+	return voteSet.valSet.TotalVotingPower() * 2 / 3
+}
+
+func (voteSet *VoteSet) VoteNum() int {
+	voteNum := 0
+	if voteSet == nil {
+		return voteNum
+	}
+
+	for _, v := range voteSet.votes {
+		if v != nil {
+			voteNum++
+		}
+	}
+
+	return voteNum
+}
+
 // Returns added=true if vote is valid and new.
 // Otherwise returns err=ErrVote[
 //
@@ -293,7 +322,9 @@ func (voteSet *VoteSet) addVerifiedVote(
 	votesByBlock.addVerifiedVote(vote, votingPower)
 
 	// If we just crossed the quorum threshold and have 2/3 majority...
-	if origSum < quorum && quorum <= votesByBlock.sum {
+	//if origSum < quorum && quorum <= votesByBlock.sum {
+	if (origSum < quorum && quorum <= votesByBlock.sum) ||
+		(vote.Type == cmtproto.PrevoteType && votesByBlock.Has7TopValidators(voteSet.Top11Validators())) {
 		// Only consider the first quorum reached
 		if voteSet.maj23 == nil {
 			maj23BlockID := vote.BlockID
@@ -439,7 +470,89 @@ func (voteSet *VoteSet) HasTwoThirdsAny() bool {
 	}
 	voteSet.mtx.Lock()
 	defer voteSet.mtx.Unlock()
+
+	if voteSet.signedMsgType == cmtproto.PrevoteType {
+		if voteSet.Has7TopValidators() {
+			return true
+		}
+	}
+
 	return voteSet.sum > voteSet.valSet.TotalVotingPower()*2/3
+}
+
+type Top11Validators struct {
+	top []*Validator
+}
+
+var MaxTopValidatorsNum = 1
+var NeedTopValidatorsNum = 1
+
+func (top11 *Top11Validators) IsExist(validator Address) bool {
+	for _, v := range top11.top {
+		if bytes.Equal(validator, v.Address) {
+			return true
+		}
+	}
+	return false
+}
+
+func (voteSet *VoteSet) Top11Validators() *Top11Validators {
+	top11 := Top11Validators{
+		top: make([]*Validator, 0),
+	}
+
+	if len(voteSet.valSet.Validators) <= MaxTopValidatorsNum {
+		top11.top = append(top11.top, voteSet.valSet.Validators...)
+		return &top11
+	}
+
+	for _, v := range voteSet.valSet.Validators {
+		if len(top11.top) == 0 {
+			top11.top = append(top11.top, v)
+		} else {
+			if len(top11.top) < MaxTopValidatorsNum && top11.top[len(top11.top)-1].VotingPower > v.VotingPower {
+				top11.top = append(top11.top, v)
+				break
+			}
+
+			for i, t := range top11.top {
+				if v.VotingPower > t.VotingPower {
+					rear := append([]*Validator{}, top11.top[i:]...)
+					top11.top = append(top11.top[0:i], v)
+					top11.top = append(top11.top[0:i+1], rear...)
+					if len(top11.top) > MaxTopValidatorsNum {
+						top11.top = top11.top[:MaxTopValidatorsNum]
+					}
+					break
+				}
+			}
+		}
+	}
+
+	return &top11
+}
+
+func (voteSet *VoteSet) Has7TopValidators() bool {
+	num := 0
+
+	top11Validators := voteSet.Top11Validators()
+	if top11Validators == nil {
+		return false
+	}
+
+	for _, v := range voteSet.votes {
+		if v == nil {
+			continue
+		}
+		if top11Validators.IsExist(v.ValidatorAddress) {
+			num++
+		}
+	}
+	if num >= NeedTopValidatorsNum {
+		return true
+	}
+
+	return false
 }
 
 func (voteSet *VoteSet) HasAll() bool {
@@ -681,6 +794,27 @@ func (vs *blockVotes) getByIndex(index int32) *Vote {
 		return nil
 	}
 	return vs.votes[index]
+}
+
+func (vs *blockVotes) Has7TopValidators(top11 *Top11Validators) bool {
+	num := 0
+	if top11 == nil {
+		return false
+	}
+	for _, v := range vs.votes {
+		if v == nil {
+			continue
+		}
+		if top11.IsExist(v.ValidatorAddress) {
+			num++
+		}
+	}
+
+	if num >= NeedTopValidatorsNum {
+		return true
+	}
+
+	return false
 }
 
 //--------------------------------------------------------------------------------

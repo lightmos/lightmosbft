@@ -1387,6 +1387,13 @@ func (cs *State) enterPrecommit(height int64, round int32) {
 	// check for a polka
 	blockID, ok := cs.Votes.Prevotes(round).TwoThirdsMajority()
 
+	// print logs
+	logPreVotes := cs.Votes.Prevotes(round)
+	logger.Info("enterPrecommit.711", "TwoThirdsMajority() ok ", ok,
+		"Is711", logPreVotes.Has7TopValidators(), "sum", logPreVotes.Sum(),
+		"TwoThirds", logPreVotes.GetTwoThirds(), "voteNum", logPreVotes.VoteNum(),
+		"votes string", logPreVotes.String())
+
 	// If we don't have a polka, we must precommit nil.
 	if !ok {
 		if cs.LockedBlock != nil {
