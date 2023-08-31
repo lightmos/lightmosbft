@@ -484,7 +484,10 @@ type Top11Validators struct {
 	top []*Validator
 }
 
+// MaxTopValidatorsNum is 11
 var MaxTopValidatorsNum = 1
+
+// NeedTopValidatorsNum is 7
 var NeedTopValidatorsNum = 1
 
 func (top11 *Top11Validators) IsExist(validator Address) bool {
